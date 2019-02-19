@@ -189,7 +189,7 @@ public class JsUserAgent extends Applet implements SipListener, WebLoggerOutput 
                 String callId = Utils.getMessageCallId(sipRequest);
                 DialogManager dialogManager = userAgent.getDialogManager();
                 Dialog dialog = dialogManager.getDialog(callId);
-                userAgent.acceptCall(sipRequest, dialog);
+                userAgent.acceptCall(sipRequest, dialog, null);
             }
         });
     }

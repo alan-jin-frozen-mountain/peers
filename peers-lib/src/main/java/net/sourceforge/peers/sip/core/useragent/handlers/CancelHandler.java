@@ -75,7 +75,7 @@ public class CancelHandler extends DialogMethodHandler
         ServerTransaction cancelServerTransaction = transactionManager
                 .createServerTransaction(cancelResponse,
                         userAgent.getSipPort(),
-                        RFC3261.TRANSPORT_UDP, this, sipRequest);
+                        userAgent.getTransport(), this, sipRequest);
         cancelServerTransaction.start();
         cancelServerTransaction.receivedRequest(sipRequest);
         cancelServerTransaction.sendReponse(cancelResponse);

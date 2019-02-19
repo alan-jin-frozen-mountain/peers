@@ -20,7 +20,10 @@
 package net.sourceforge.peers.sip.core.useragent.handlers;
 
 import java.io.IOException;
+import java.io.Closeable;
+import java.net.ServerSocket;
 import java.net.DatagramSocket;
+import java.net.Socket;
 import java.net.InetAddress;
 import java.net.SocketException;
 import java.net.UnknownHostException;
@@ -32,8 +35,6 @@ import java.util.List;
 import java.util.Timer;
 
 import net.sourceforge.peers.Logger;
-import net.sourceforge.peers.media.MediaManager;
-import net.sourceforge.peers.sdp.Codec;
 import net.sourceforge.peers.sdp.MediaDestination;
 import net.sourceforge.peers.sdp.NoCodecException;
 import net.sourceforge.peers.sdp.SessionDescription;
@@ -41,6 +42,7 @@ import net.sourceforge.peers.sip.RFC3261;
 import net.sourceforge.peers.sip.Utils;
 import net.sourceforge.peers.sip.core.useragent.RequestManager;
 import net.sourceforge.peers.sip.core.useragent.SipListener;
+import net.sourceforge.peers.sip.core.useragent.SocketHolder;
 import net.sourceforge.peers.sip.core.useragent.UserAgent;
 import net.sourceforge.peers.sip.syntaxencoding.NameAddress;
 import net.sourceforge.peers.sip.syntaxencoding.SipHeaderFieldName;
@@ -98,7 +100,7 @@ public class InviteHandler extends DialogMethodHandler
         
         InviteServerTransaction inviteServerTransaction = (InviteServerTransaction)
             transactionManager.createServerTransaction(sipResponse,
-                    userAgent.getSipPort(), RFC3261.TRANSPORT_UDP, this,
+                    userAgent.getSipPort(), userAgent.getTransport(), this,
                     sipRequest);
         
         inviteServerTransaction.start();
@@ -140,9 +142,9 @@ public class InviteHandler extends DialogMethodHandler
             dialog.setRemoteTarget(contactStr);
         }
 
-
+        // TODO, update icelink connection when reinvite.
         // update session
-        sendSuccessfulResponse(sipRequest, dialog);
+        sendSuccessfulResponse(sipRequest, dialog, null);
         
     }
 
@@ -190,7 +192,41 @@ public class InviteHandler extends DialogMethodHandler
         return datagramSocket;
     }
 
-    private synchronized void sendSuccessfulResponse(SipRequest sipRequest, Dialog dialog) {
+
+
+    private Socket _tcpSocket;
+
+    private Socket getTcpSocket() {
+        if (_tcpSocket == null) { // initial invite success response
+            // AccessController.doPrivileged added for plugin compatibility
+            _tcpSocket = AccessController.doPrivileged(
+                    new PrivilegedAction<Socket>() {
+
+                        @Override
+                        public Socket run() {
+                            Socket socket = null;
+                            try{
+                                int foundPort = SocketHolder.findFreePort();
+                                socket = new Socket(userAgent.getConfig().getLocalInetAddress(),foundPort);
+                            }catch (IOException e) {
+                                logger.error("cannot create new specified tcp socket ", e);
+                            }
+
+                            return socket;
+                        }
+                    }
+            );
+            logger.debug("new tcp Socket " + _tcpSocket.hashCode());
+            try {
+                _tcpSocket.setSoTimeout(TIMEOUT);
+            } catch (SocketException e) {
+                logger.error("cannot set timeout on datagram socket ", e);
+            }
+        }
+        return _tcpSocket;
+    }
+
+    private synchronized void sendSuccessfulResponse(SipRequest sipRequest, Dialog dialog, String responseSdp) {
         SipHeaders reqHeaders = sipRequest.getSipHeaders();
         SipHeaderFieldValue contentType =
             reqHeaders.get(new SipHeaderFieldName(RFC3261.HDR_CONTENT_TYPE));
@@ -227,30 +263,42 @@ public class InviteHandler extends DialogMethodHandler
         // TODO 486 or 600
         
         byte[] offerBytes = sipRequest.getBody();
-        SessionDescription answer;
-        try {
-            DatagramSocket datagramSocket = getDatagramSocket();
-
-            if (offerBytes != null && contentType != null &&
-                    RFC3261.CONTENT_TYPE_SDP.equals(contentType.getValue())) {
-                // create response in 200
-                try {
-                    SessionDescription offer = sdpManager.parse(offerBytes);
-                    answer = sdpManager.createSessionDescription(offer,
-                            datagramSocket.getLocalPort());
-                    mediaDestination = sdpManager.getMediaDestination(offer);
-                } catch (NoCodecException e) {
-                    answer = sdpManager.createSessionDescription(null,
-                            datagramSocket.getLocalPort());
+        if(responseSdp != null){
+            sipResponse.setBody(responseSdp.getBytes());
+        }
+        else{
+            SessionDescription answer;
+            try {
+                int localPort = 0;
+                if(userAgent.getTransport().equals(RFC3261.TRANSPORT_TCP)) {
+                    Socket tcpSocket = getTcpSocket();
+                    localPort = tcpSocket.getLocalPort();
+                } else {
+                    DatagramSocket diagramSocket = getDatagramSocket();
+                    localPort = diagramSocket.getLocalPort();
                 }
-            } else {
-                // create offer in 200 (never tested...)
-                answer = sdpManager.createSessionDescription(null,
-                        datagramSocket.getLocalPort());
+
+                if (offerBytes != null && contentType != null &&
+                        RFC3261.CONTENT_TYPE_SDP.equals(contentType.getValue())) {
+                    // create response in 200
+                    try {
+                        SessionDescription offer = sdpManager.parse(offerBytes);
+                        answer = sdpManager.createSessionDescription(offer,
+                                localPort);
+                        mediaDestination = sdpManager.getMediaDestination(offer);
+                    } catch (NoCodecException e) {
+                        answer = sdpManager.createSessionDescription(null,
+                                localPort);
+                    }
+                } else {
+                    // create offer in 200 (never tested...)
+                    answer = sdpManager.createSessionDescription(null,
+                            localPort);
+                }
+                sipResponse.setBody(answer.toString().getBytes());
+            } catch (IOException e) {
+                logger.error(e.getMessage(), e);
             }
-            sipResponse.setBody(answer.toString().getBytes());
-        } catch (IOException e) {
-            logger.error(e.getMessage(), e);
         }
         
         SipHeaders respHeaders = sipResponse.getSipHeaders();
@@ -274,7 +322,7 @@ public class InviteHandler extends DialogMethodHandler
             // in re-INVITE case, no serverTransaction has been created
             serverTransaction = (InviteServerTransaction)
             transactionManager.createServerTransaction(sipResponse,
-                    userAgent.getSipPort(), RFC3261.TRANSPORT_UDP, this,
+                    userAgent.getSipPort(), userAgent.getTransport(), this,
                     sipRequest);
         }
         serverTransaction.start();
@@ -290,8 +338,8 @@ public class InviteHandler extends DialogMethodHandler
 //        logger.getInstance().debug("dialog state: " + dialog.getState());
     }
 
-    public void acceptCall(SipRequest sipRequest, Dialog dialog) {
-        sendSuccessfulResponse(sipRequest, dialog);
+    public void acceptCall(SipRequest sipRequest, Dialog dialog, String responseSdp) {
+        sendSuccessfulResponse(sipRequest, dialog, responseSdp);
         
         dialog.receivedOrSent2xx();
 //        logger.getInstance().debug("dialog state: " + dialog.getState());
@@ -340,7 +388,7 @@ public class InviteHandler extends DialogMethodHandler
     // UAC methods
     //////////////////////////////////////////////////////////
     
-    public ClientTransaction preProcessInvite(SipRequest sipRequest)
+    public ClientTransaction preProcessInvite(SipRequest sipRequest, boolean sdpAlready)
             throws SipUriSyntaxException {
         
         //8.1.2
@@ -350,7 +398,7 @@ public class InviteHandler extends DialogMethodHandler
 
         //TODO if header route is present, addrspec = toproute.nameaddress.addrspec
 
-        String transport = RFC3261.TRANSPORT_UDP;
+        String transport = userAgent.getTransport();
         Hashtable<String, String> params = destinationUri.getUriParameters();
         if (params != null) {
             String reqUriTransport = params.get(RFC3261.PARAM_TRANSPORT);
@@ -376,15 +424,22 @@ public class InviteHandler extends DialogMethodHandler
         ClientTransaction clientTransaction = transactionManager
                 .createClientTransaction(sipRequest, inetAddress,
                     port, transport, null, this);
-        DatagramSocket datagramSocket;
+        int localPort = 0;
+
         synchronized (this) {
-            datagramSocket = getDatagramSocket();
+            if(userAgent.getTransport().equals(RFC3261.TRANSPORT_TCP)) {
+                localPort = getTcpSocket().getLocalPort();
+            } else {
+                localPort = getDatagramSocket().getLocalPort();
+            }
         }
         try {
-            SessionDescription sessionDescription =
-                sdpManager.createSessionDescription(null,
-                        datagramSocket.getLocalPort());
-            sipRequest.setBody(sessionDescription.toString().getBytes());
+            if(!sdpAlready){
+                SessionDescription sessionDescription =
+                        sdpManager.createSessionDescription(null,
+                                localPort);
+                sipRequest.setBody(sessionDescription.toString().getBytes());
+            }
         } catch (IOException e) {
             logger.error(e.getMessage(), e);
         }
@@ -538,15 +593,15 @@ public class InviteHandler extends DialogMethodHandler
         } catch (NoCodecException e) {
             logger.error(e.getMessage(), e);
         }
-        String remoteAddress = mediaDestination.getDestination();
+
+        /*String remoteAddress = mediaDestination.getDestination();
         int remotePort = mediaDestination.getPort();
         Codec codec = mediaDestination.getCodec();
         String localAddress = userAgent.getConfig()
             .getLocalInetAddress().getHostAddress();
-
         userAgent.getMediaManager().successResponseReceived(localAddress,
                 remoteAddress, remotePort, codec);
-        
+        */
         //switch to confirmed state
         dialog.receivedOrSent2xx();
         
@@ -589,7 +644,7 @@ public class InviteHandler extends DialogMethodHandler
 
         //TODO if header route is present, addrspec = toproute.nameaddress.addrspec
         
-        String transport = RFC3261.TRANSPORT_UDP;
+        String transport = userAgent.getTransport();
         Hashtable<String, String> params = destinationUri.getUriParameters();
         if (params != null) {
             String reqUriTransport = params.get(RFC3261.PARAM_TRANSPORT);
@@ -637,6 +692,7 @@ public class InviteHandler extends DialogMethodHandler
         // in first case, captureRtpSender and incomingRtpReader must be
         // created, in the second case, they must be updated.
 
+        /*
         logger.debug("handleAck");
 
         if (mediaDestination == null) {
@@ -663,11 +719,11 @@ public class InviteHandler extends DialogMethodHandler
         
         MediaManager mediaManager = userAgent.getMediaManager();
         if (initialIncomingInvite) {
-            mediaManager.handleAck(destAddress, destPort, codec);
+            //mediaManager.handleAck(destAddress, destPort, codec);
         } else {
             mediaManager.updateRemote(destAddress, destPort, codec);
         }
-
+        */
     }
 
     public void transactionTimeout(ClientTransaction clientTransaction) {

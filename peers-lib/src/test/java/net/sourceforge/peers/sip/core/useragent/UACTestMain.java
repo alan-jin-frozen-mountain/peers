@@ -23,6 +23,7 @@ import java.net.SocketException;
 
 import net.sourceforge.peers.FileLogger;
 import net.sourceforge.peers.media.AbstractSoundManager;
+import net.sourceforge.peers.sip.RFC3261;
 import net.sourceforge.peers.sip.syntaxencoding.SipUriSyntaxException;
 import net.sourceforge.peers.sip.transport.SipRequest;
 
@@ -35,7 +36,7 @@ public class UACTestMain {
         AbstractSoundManager soundManager = new DummySoundManager();
         try {
             userAgent = new UserAgent(null, (String)null, new FileLogger(null),
-                    soundManager);
+                    soundManager, RFC3261.TRANSPORT_UDP);
             requestUri = "sip:bob@" + userAgent.getConfig()
                 .getLocalInetAddress().getHostAddress() + ":6060";
             sipRequest = userAgent.invite(requestUri,

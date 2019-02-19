@@ -68,7 +68,7 @@ public class UAS implements SipServerTransportUser {
         this.dialogManager = dialogManager;
         transportManager.setSipServerTransportUser(this);
         transportManager.createServerTransport(
-                RFC3261.TRANSPORT_UDP, userAgent.getConfig().getSipPort());
+                userAgent.getTransport(), userAgent.getConfig().getSipPort());
     }
     
     public void messageReceived(SipMessage sipMessage) {
@@ -113,9 +113,9 @@ public class UAS implements SipServerTransportUser {
         }
     }
 
-    void acceptCall(SipRequest sipRequest, Dialog dialog) {
+    void acceptCall(SipRequest sipRequest, Dialog dialog, String responseSdp) {
         initialRequestManager.getInviteHandler().acceptCall(sipRequest,
-                dialog);
+                dialog, responseSdp);
     }
 
     void rejectCall(SipRequest sipRequest) {

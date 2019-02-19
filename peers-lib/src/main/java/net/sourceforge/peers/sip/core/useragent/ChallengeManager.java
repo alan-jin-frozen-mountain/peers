@@ -169,7 +169,7 @@ public class ChallengeManager implements MessageInterceptor {
                     RFC3261.PARAM_TAG));
         	try {
                 initialRequestManager.createInitialRequest(
-                        requestUri, method, profileUri, callId, fromTag, this);
+                        requestUri, method, profileUri, callId, fromTag, this, null);
             } catch (SipUriSyntaxException e) {
                 logger.error("syntax error", e);
             }

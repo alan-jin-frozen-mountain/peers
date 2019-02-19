@@ -32,10 +32,11 @@ import java.util.Map;
 import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
 
+import fm.icelink.*;
+import fm.icelink.dtmf.Tone;
 import net.sourceforge.peers.Config;
 import net.sourceforge.peers.Logger;
 import net.sourceforge.peers.media.AbstractSoundManager;
-import net.sourceforge.peers.media.MediaManager;
 import net.sourceforge.peers.sip.RFC3261;
 import net.sourceforge.peers.sip.Utils;
 import net.sourceforge.peers.sip.core.useragent.SipListener;
@@ -69,8 +70,13 @@ public class EventManager implements SipListener, MainFrameListener,
     private boolean closed;
     private Logger logger;
 
+    private Connection connection;
+    private fm.icelink.AudioTrack localAudioTrack;
+    private String publicIpAddress;
+    public static IceServer IceServers;
+
     public EventManager(MainFrame mainFrame, String peersHome,
-            Logger logger, AbstractSoundManager soundManager) {
+            Logger logger, AbstractSoundManager soundManager, String transport) {
         this.mainFrame = mainFrame;
         this.logger = logger;
         callFrames = Collections.synchronizedMap(
@@ -78,7 +84,7 @@ public class EventManager implements SipListener, MainFrameListener,
         closed = false;
         // create sip stack
         try {
-            userAgent = new UserAgent(this, peersHome, logger, soundManager);
+            userAgent = new UserAgent(this, peersHome, logger, soundManager, transport);
         } catch (SocketException e) {
             SwingUtilities.invokeLater(new Runnable() {
                 @Override
@@ -157,9 +163,44 @@ public class EventManager implements SipListener, MainFrameListener,
                 if (callFrame != null) {
                     callFrame.calleePickup();
                 }
+
+                if(connection != null){
+                    String sdpMessage = new String(sipResponse.getBody());
+                    fm.icelink.SessionDescription remoteSdp = new fm.icelink.SessionDescription();
+                    remoteSdp.setSdpMessage(fm.icelink.sdp.Message.parse(sdpMessage));
+
+                    // If video not supported by remote peer, video will be rejected by remote peer.
+                    if(remoteSdp.getHasVideo() == false || remoteSdp.getSdpMessage().getVideoDescription().getMedia().getTransportPort() == 0) {
+                        SessionDescription localDescription = connection.getLocalDescription();
+                        fm.icelink.sdp.MediaDescription videoDescription = localDescription.getSdpMessage().getVideoDescription();
+                        localDescription.getSdpMessage().removeMediaDescription(videoDescription);
+
+                        disableVideo = true;
+                        Reconnect(remoteSdp, localDescription);
+                    }
+                    else{
+                        remoteSdp.setType(fm.icelink.SessionDescriptionType.Answer);
+                        remoteSdp.setTieBreaker(java.util.UUID.randomUUID().toString());
+                        connection.setRemoteDescription(remoteSdp);
+                    }
+                }
             }
         });
+    }
 
+    private void Reconnect(SessionDescription remoteSdp, SessionDescription localDescription) {
+        connection.close();
+        connection = CreateConnection();
+
+        connection.createOffer().then((sd)->{
+            connection.setLocalDescription(localDescription).then((dd) -> {
+                fm.icelink.sdp.MediaDescription remoteVideoDescription = remoteSdp.getSdpMessage().getVideoDescription();
+                remoteSdp.getSdpMessage().removeMediaDescription(remoteVideoDescription);
+                remoteSdp.setType(SessionDescriptionType.Answer);
+                remoteSdp.setTieBreaker(java.util.UUID.randomUUID().toString());
+                connection.setRemoteDescription(remoteSdp);
+            });
+        });
     }
 
     @Override
@@ -184,6 +225,7 @@ public class EventManager implements SipListener, MainFrameListener,
             
             @Override
             public void run() {
+                disableVideo = false;
                 SipHeaders sipHeaders = sipRequest.getSipHeaders();
                 SipHeaderFieldName sipHeaderFieldName =
                     new SipHeaderFieldName(RFC3261.HDR_FROM);
@@ -210,6 +252,7 @@ public class EventManager implements SipListener, MainFrameListener,
                 if (callFrame != null) {
                     callFrame.remoteHangup();
                 }
+                localMedia.stop();
             }
         });
 
@@ -262,24 +305,35 @@ public class EventManager implements SipListener, MainFrameListener,
             
             @Override
             public void run() {
+                disableVideo = false;
+
                 String callId = Utils.generateCallID(
                         userAgent.getConfig().getLocalInetAddress());
                 CallFrame callFrame = new CallFrame(uri, callId,
                         EventManager.this, logger);
                 callFrames.put(callId, callFrame);
-                SipRequest sipRequest;
-                try {
-                    sipRequest = userAgent.invite(uri, callId);
-                } catch (SipUriSyntaxException e) {
-                    logger.error(e.getMessage(), e);
-                    mainFrame.setLabelText(e.getMessage());
-                    return;
-                }
-                callFrame.setSipRequest(sipRequest);
-                callFrame.callClicked();
+
+                VideoChat videoChat = callFrame.getVideoChat();
+
+                startLocalMedia(videoChat);
+                connection = CreateConnection();
+                connection.createOffer().then((sd)->{
+                    SipRequest sipRequest;
+                    connection.setLocalDescription(sd);
+                    String sdpMessage = sd.getSdpMessage().toString();
+                    try {
+                        sipRequest = userAgent.invite(uri, callId, sdpMessage);
+                        callFrame.setSipRequest(sipRequest);
+                        callFrame.callClicked();
+                    }
+                    catch (Exception e) {
+                            logger.error(e.getMessage(), e);
+                            mainFrame.setLabelText(e.getMessage());
+                            return;
+                        }
+                });
             }
         });
-
     }
 
     @Override
@@ -312,6 +366,7 @@ public class EventManager implements SipListener, MainFrameListener,
             @Override
             public void run() {
                 userAgent.terminate(sipRequest);
+                localMedia.stop();
             }
         });
     }
@@ -321,18 +376,49 @@ public class EventManager implements SipListener, MainFrameListener,
         SwingUtilities.invokeLater(new Runnable() {
             @Override
             public void run() {
-                String callId = Utils.getMessageCallId(sipRequest);
-                DialogManager dialogManager = userAgent.getDialogManager();
-                Dialog dialog = dialogManager.getDialog(callId);
-                userAgent.acceptCall(sipRequest, dialog);
+                CallFrame callFrame = getCallFrame(sipRequest);
+
+                SessionDescription remoteSdp = new SessionDescription();
+                String remoteSdpString = new String(sipRequest.getBody());
+                remoteSdp.setSdpMessage(fm.icelink.sdp.Message.parse(remoteSdpString));
+                remoteSdp.setType(SessionDescriptionType.Offer);
+                remoteSdp.setTieBreaker(java.util.UUID.randomUUID().toString());
+
+                // If video not supported by remote peer.
+                if(remoteSdp.getHasVideo() == false || remoteSdp.getSdpMessage().getVideoDescription().getMedia().getTransportPort() == 0) {
+                    disableVideo = true;
+                }
+
+                startLocalMedia(callFrame.getVideoChat());
+                connection = CreateConnection();
+
+
+                connection.setRemoteDescription(remoteSdp)
+                        .then((sd) -> {
+                            connection.createAnswer()
+                                    .then((localSdp)->{
+                                        String callId = Utils.getMessageCallId(sipRequest);
+                                        DialogManager dialogManager = userAgent.getDialogManager();
+                                        Dialog dialog = dialogManager.getDialog(callId);
+                                        userAgent.acceptCall(sipRequest, dialog, localSdp.getSdpMessage().toString());
+
+                                        connection.setLocalDescription(localSdp);
+                                    })
+                                    .fail((ex) ->{
+                                        logger.error("Create answer failed.", ex);
+                                    });
+                        })
+                        .fail((ex) ->{
+                            logger.error("Set remote description failed.", ex);
+                        });
             }
         });
     }
-    
+
     @Override
     public void busyHereClicked(final SipRequest sipRequest) {
         SwingUtilities.invokeLater(new Runnable() {
-            
+
             @Override
             public void run() {
                 userAgent.rejectCall(sipRequest);
@@ -340,14 +426,19 @@ public class EventManager implements SipListener, MainFrameListener,
         });
 
     }
-    
+
     @Override
     public void dtmf(final char digit) {
         SwingUtilities.invokeLater(new Runnable() {
             @Override
             public void run() {
-                MediaManager mediaManager = userAgent.getMediaManager();
-                mediaManager.sendDtmf(digit);
+                if(connection != null) {
+                    AudioStream audioStream = connection.getAudioStream();
+                    if(audioStream != null) {
+                        Tone tone = new Tone(String.valueOf(digit));
+                        audioStream.insertDtmfTone(tone);
+                    }
+                }
             }
         });
     }
@@ -417,4 +508,136 @@ public class EventManager implements SipListener, MainFrameListener,
         }
     }
 
+    private LocalMedia localMedia = null;
+    private AecContext aecContext = null;
+    private LayoutManager layoutManager = null;
+    private boolean disableVideo = false;
+
+    private Connection CreateConnection()
+    {
+        // Create connection to remote client.
+        final RemoteMedia remoteMedia = new RemoteMedia(false, disableVideo, aecContext);
+        remoteMedia.getViewSink().addOnProcessFrame((frame) -> {
+            logger.debug("Received video frame with length: " + frame.getBuffer().getDataBuffer().getLength());
+        });
+        final AudioStream audioStream = new AudioStream(localMedia, remoteMedia);
+        audioStream.setLocalSend(true);
+        audioStream.setLocalReceive(true);
+
+        publicIpAddress = userAgent.getConfig().getLocalInetAddress().getHostAddress();
+        audioStream.setEncryptionPolicy(EncryptionPolicy.Disabled);
+        if(!disableVideo){
+            final VideoStream videoStream = new VideoStream(localMedia, remoteMedia);
+            videoStream.setLocalSend(true);
+            videoStream.setLocalReceive(true);
+            videoStream.setEncryptionPolicy(EncryptionPolicy.Disabled);
+            connection = new Connection(new Stream[]{audioStream, videoStream});
+        }
+        else{
+            connection = new Connection(new Stream[]{audioStream});
+        }
+
+        //To make sure connection is using specified ip address used for sip register.
+        if(publicIpAddress != null) {
+            connection.setPrivateIPAddress(publicIpAddress);
+        }
+
+        connection.setIceAddressTypes(new fm.icelink.AddressType[]{fm.icelink.AddressType.IPv4});
+        connection.setIcePolicy(fm.icelink.IcePolicy.Disabled);
+        connection.setTrickleIcePolicy(TrickleIcePolicy.NotSupported);
+
+        connection.addOnStateChange(new fm.icelink.IAction1<Connection>() {
+            public void invoke(Connection c) {
+                if (c.getState() == ConnectionState.Connecting) {
+                    if (remoteMedia.getView() != null) {
+                        // set remote view on layout manager
+                        fm.icelink.java.VideoComponent view = remoteMedia.getView();
+                        view.setName("remoteView_" + remoteMedia.getId());
+                        layoutManager.addRemoteView(remoteMedia.getId(), view);
+                    }
+                }
+                else if (c.getState() == ConnectionState.Connected)
+                {
+                }
+                else if (c.getState() == ConnectionState.Closing ||
+                        c.getState() == ConnectionState.Failing) {
+                    // Remove the remote view from the layout.
+                    if (layoutManager!= null) {
+                        layoutManager.removeRemoteView(remoteMedia.getId());
+                    }
+                    remoteMedia.destroy();
+                }
+                else if (c.getState() == ConnectionState.Closed) {
+                }
+                else if (c.getState() == ConnectionState.Failed) {
+                }
+            }
+        });
+
+        return connection;
+    }
+
+    public fm.icelink.Future<fm.icelink.LocalMedia> startLocalMedia(VideoChat videoChat)
+    {
+        return fm.icelink.openh264.Utility.downloadOpenH264()
+                .then((o) -> {
+                    aecContext = new AecContext();
+                    localMedia = new LocalMedia(false,disableVideo,aecContext);
+
+                    localMedia.getVideoSourceInputs().then((SourceInput[] inputs) -> {
+                        videoChat.videoDevices.setModel(new javax.swing.DefaultComboBoxModel(inputs));
+                        videoChat.videoDevices.addActionListener((e) -> {
+                            switchVideoDevice((javax.swing.JComboBox<String>)e.getSource());
+                        });
+                    });
+
+                    localMedia.getAudioSourceInputs().then((SourceInput[] inputs) -> {
+                        videoChat.audioDevices.setModel(new javax.swing.DefaultComboBoxModel(inputs));
+                        videoChat.audioDevices.addActionListener((e) -> {
+                            switchAudioDevice((javax.swing.JComboBox<String>)e.getSource());
+                        });
+                    });
+
+                    fm.icelink.java.VideoComponent view = localMedia.getView();
+
+                    layoutManager = new fm.icelink.java.LayoutManager(videoChat.container);
+                    layoutManager.setLocalView(view);
+
+                    return localMedia.start();
+                });
+    }
+
+    public fm.icelink.Future<fm.icelink.LocalMedia> stopLocalMedia()
+    {
+        return Promise.wrapPromise(() -> {
+            if (localMedia != null) {
+                return localMedia.stop().then((o) -> {
+                    LayoutManager lm = layoutManager;
+                    if (lm != null) {
+                        lm.removeRemoteViews();
+                        lm.unsetLocalView();
+                        layoutManager = null;
+                    }
+                    localMedia.destroy(); // localMedia.destroy() will also destroy aecContext.
+                    localMedia = null;
+                });
+            }
+            else
+            {
+                return Promise.resolveNow(null);
+            }
+        });
+    }
+
+    private void switchAudioDevice(javax.swing.JComboBox<String> box)
+    {
+        SourceInput newInput = (SourceInput)box.getSelectedItem();
+        localMedia.changeAudioSourceInput(newInput);
+    }
+
+    private void switchVideoDevice(javax.swing.JComboBox<String> box)
+    {
+        SourceInput newInput = (SourceInput)box.getSelectedItem();
+        localMedia.changeVideoSourceInput(newInput);
+    }
 }

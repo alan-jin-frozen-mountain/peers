@@ -23,6 +23,7 @@ import java.net.SocketException;
 
 import net.sourceforge.peers.FileLogger;
 import net.sourceforge.peers.media.AbstractSoundManager;
+import net.sourceforge.peers.sip.RFC3261;
 
 
 public class UASTestMain {
@@ -34,7 +35,7 @@ public class UASTestMain {
         AbstractSoundManager soundManager = new DummySoundManager();
         try {
             new UserAgent(null, (String)null, new FileLogger(null),
-                    soundManager);
+                    soundManager, RFC3261.TRANSPORT_UDP);
         } catch (SocketException e) {
             e.printStackTrace();
         }

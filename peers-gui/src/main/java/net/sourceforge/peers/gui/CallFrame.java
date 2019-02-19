@@ -62,6 +62,8 @@ public class CallFrame implements ActionListener, WindowListener {
     private CallFrameListener callFrameListener;
     private SipRequest sipRequest;
 
+    private VideoChat videoChat;
+
     CallFrame(String remoteParty, String id,
             CallFrameListener callFrameListener, Logger logger) {
         INIT = new CallFrameStateInit(id, this, logger);
@@ -84,6 +86,9 @@ public class CallFrame implements ActionListener, WindowListener {
         contentPane.add(remotePartyLabel);
         Keypad keypad = new Keypad(this);
         contentPane.add(keypad);
+
+        videoChat = new VideoChat(this);
+        contentPane.add(videoChat);
         callPanelContainer = new JPanel();
         contentPane.add(callPanelContainer);
         frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
@@ -146,6 +151,8 @@ public class CallFrame implements ActionListener, WindowListener {
     public JFrame getFrame() {
         return frame;
     }
+
+    public VideoChat getVideoChat() {return videoChat;}
 
     public void setCallPanel(JPanel callPanel) {
         if (this.callPanel != null) {

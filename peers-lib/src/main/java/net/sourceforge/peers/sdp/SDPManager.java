@@ -30,6 +30,8 @@ import net.sourceforge.peers.Config;
 import net.sourceforge.peers.Logger;
 import net.sourceforge.peers.rtp.RFC3551;
 import net.sourceforge.peers.rtp.RFC4733;
+import net.sourceforge.peers.rtp.VP8;
+import net.sourceforge.peers.rtp.VP9;
 import net.sourceforge.peers.sip.core.useragent.UserAgent;
 
 public class SDPManager {
@@ -59,6 +61,18 @@ public class SDPManager {
         codec = new Codec();
         codec.setPayloadType(RFC4733.PAYLOAD_TYPE_TELEPHONE_EVENT);
         codec.setName(RFC4733.TELEPHONE_EVENT);
+        //TODO add fmtp:98 0-15 attribute
+        supportedCodecs.add(codec);
+
+        codec = new Codec();
+        codec.setPayloadType(VP8.PAYLOAD_TYPE_VP8);
+        codec.setName(VP8.VP8);
+        //TODO add fmtp:99 0-15 attribute
+        supportedCodecs.add(codec);
+
+        codec = new Codec();
+        codec.setPayloadType(VP9.PAYLOAD_TYPE_VP9);
+        codec.setName(VP9.VP9);
         //TODO add fmtp:101 0-15 attribute
         supportedCodecs.add(codec);
     }

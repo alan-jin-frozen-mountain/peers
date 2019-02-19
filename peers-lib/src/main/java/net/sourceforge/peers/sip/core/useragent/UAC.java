@@ -122,7 +122,7 @@ public class UAC {
                     userAgent.getConfig().getLocalInetAddress());
             initialRequestManager.createInitialRequest(requestUri,
                     RFC3261.METHOD_REGISTER, profileUri, registerCallID, null,
-                    messageInterceptor);
+                    messageInterceptor, null);
         }
     }
     
@@ -130,7 +130,12 @@ public class UAC {
             throws SipUriSyntaxException {
         return initialRequestManager.createInitialRequest(requestUri,
                 RFC3261.METHOD_INVITE, profileUri, callId);
-        
+    }
+
+    SipRequest invite(String requestUri, String callId, String sdpMessage)
+            throws SipUriSyntaxException {
+        return initialRequestManager.createInitialRequest(requestUri,
+                RFC3261.METHOD_INVITE, profileUri, callId, sdpMessage);
     }
 
     private SipRequest getInviteWithAuth(String callId) {

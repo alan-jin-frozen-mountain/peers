@@ -46,6 +46,8 @@ import net.sourceforge.peers.sip.transport.TransportManager;
 public class InitialRequestManager extends RequestManager
         implements ServerTransactionUser {
 
+    private String sdpMessage = null;
+
     public InitialRequestManager(UserAgent userAgent,
             InviteHandler inviteHandler,
             CancelHandler cancelHandler,
@@ -150,29 +152,50 @@ public class InitialRequestManager extends RequestManager
             String profileUri, String callId) throws SipUriSyntaxException {
         
         return createInitialRequest(requestUri, method, profileUri, callId,
-                null, null);
+                null, null, null);
+    }
+
+    public SipRequest createInitialRequest(String requestUri, String method,
+                                           String profileUri, String callId, String sdpMessage) throws SipUriSyntaxException {
+
+        return createInitialRequest(requestUri, method, profileUri, callId,
+                null, null, sdpMessage);
     }
     
     public SipRequest createInitialRequest(String requestUri, String method,
             String profileUri, String callId, String fromTag,
-            MessageInterceptor messageInterceptor)
+            MessageInterceptor messageInterceptor, String sdpMessage)
                 throws SipUriSyntaxException {
-        
         SipRequest sipRequest = getGenericRequest(requestUri, method,
                 profileUri, callId, fromTag);
-        
+
+        if(sdpMessage != null){
+            this.sdpMessage = sdpMessage;
+        }
+
+        boolean sdpAlready = false;
+        if(this.sdpMessage != null){
+            sipRequest.setBody(this.sdpMessage.getBytes());
+            sdpAlready = true;
+        }
+        sipRequest.getSipHeaders().add(new SipHeaderFieldName(RFC3261.HDR_ALLOW),
+                new SipHeaderFieldValue(Utils.generateAllowHeader()));
+
+        sipRequest.getSipHeaders().add(new SipHeaderFieldName(RFC3261.HDR_USER_AGENT),
+                new SipHeaderFieldValue("FM"));
+
         // TODO add route header for outbound proxy give it to xxxHandler to create
         // clientTransaction
         SipURI outboundProxy = userAgent.getOutboundProxy();
         if (outboundProxy != null) {
-            NameAddress outboundProxyNameAddress =
+                    NameAddress outboundProxyNameAddress =
                 new NameAddress(outboundProxy.toString());
             sipRequest.getSipHeaders().add(new SipHeaderFieldName(RFC3261.HDR_ROUTE),
                     new SipHeaderFieldValue(outboundProxyNameAddress.toString()), 0);
         }
         ClientTransaction clientTransaction = null;
         if (RFC3261.METHOD_INVITE.equals(method)) {
-            clientTransaction = inviteHandler.preProcessInvite(sipRequest);
+            clientTransaction = inviteHandler.preProcessInvite(sipRequest, sdpAlready);
         } else if (RFC3261.METHOD_REGISTER.equals(method)) {
             clientTransaction = registerHandler.preProcessRegister(sipRequest);
         }
@@ -258,7 +281,7 @@ public class InitialRequestManager extends RequestManager
         if (sipResponse != null) {
             ServerTransaction serverTransaction =
                 transactionManager.createServerTransaction(
-                    sipResponse, userAgent.getSipPort(), RFC3261.TRANSPORT_UDP,
+                    sipResponse, userAgent.getSipPort(), userAgent.getTransport(),
                     this, sipRequest);
             serverTransaction.start();
             serverTransaction.receivedRequest(sipRequest);

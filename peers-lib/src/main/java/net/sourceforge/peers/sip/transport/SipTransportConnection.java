@@ -54,11 +54,9 @@ public class SipTransportConnection {
         if (!transport.equalsIgnoreCase(other.transport)) {
             return false;
         }
-        if (RFC3261.TRANSPORT_UDP.equalsIgnoreCase(transport)) {
-            return localInetAddress.equals(other.localInetAddress) &&
+        return localInetAddress.equals(other.localInetAddress) &&
                 localPort == other.localPort;
-        }
-        return false;
+        //return false;
     }
     
     @Override

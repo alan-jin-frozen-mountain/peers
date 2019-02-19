@@ -66,7 +66,7 @@ public class OptionsHandler extends MethodHandler
                 new SipHeaderFieldValue(Utils.generateAllowHeader()));
         ServerTransaction serverTransaction =
             transactionManager.createServerTransaction(
-                sipResponse, userAgent.getSipPort(), RFC3261.TRANSPORT_UDP,
+                sipResponse, userAgent.getSipPort(), userAgent.getTransport(),
                 this, sipRequest);
         serverTransaction.start();
         serverTransaction.receivedRequest(sipRequest);

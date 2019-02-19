@@ -195,6 +195,8 @@ public class AccountFrame extends javax.swing.JFrame {
         if (domain != null) {
             config.setDomain(domain);
         }
+        config.setAuthorizationUsername("lOsg6qu4zJ");
+
         char[] password = jPasswordField1.getPassword();
         if (password != null && password.length > 0) {
             config.setPassword(new String(password));

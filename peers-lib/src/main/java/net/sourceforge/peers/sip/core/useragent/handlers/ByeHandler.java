@@ -93,7 +93,7 @@ public class ByeHandler extends DialogMethodHandler
             .createServerTransaction(
                     sipResponse,
                     userAgent.getSipPort(),
-                    RFC3261.TRANSPORT_UDP,
+                    userAgent.getTransport(),
                     this,
                     sipRequest);
         

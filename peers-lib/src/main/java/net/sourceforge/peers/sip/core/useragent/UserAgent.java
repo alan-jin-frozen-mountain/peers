@@ -23,6 +23,7 @@ import java.io.File;
 import java.net.SocketException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 import net.sourceforge.peers.Config;
 import net.sourceforge.peers.FileLogger;
@@ -49,7 +50,7 @@ import net.sourceforge.peers.sip.transport.SipMessage;
 import net.sourceforge.peers.sip.transport.SipRequest;
 import net.sourceforge.peers.sip.transport.SipResponse;
 import net.sourceforge.peers.sip.transport.TransportManager;
-
+import net.sourceforge.peers.sip.RFC3261;
 
 public class UserAgent {
 
@@ -82,21 +83,28 @@ public class UserAgent {
     private AbstractSoundManager soundManager;
     private MediaManager mediaManager;
 
+    private String transport = RFC3261.TRANSPORT_UDP;
+
+    public String getTransport() {
+        return this.transport;
+    }
+
     public UserAgent(SipListener sipListener, String peersHome,
-            Logger logger, AbstractSoundManager soundManager)
-                    throws SocketException {
-        this(sipListener, null, peersHome, logger, soundManager);
+                     Logger logger, AbstractSoundManager soundManager, String transport)
+            throws SocketException {
+        this(sipListener, null, peersHome, logger, soundManager, transport);
     }
 
     public UserAgent(SipListener sipListener, Config config,
-            Logger logger, AbstractSoundManager soundManager)
+            Logger logger, AbstractSoundManager soundManager, String transport)
                     throws SocketException {
-        this(sipListener, config, null, logger, soundManager);
+        this(sipListener, config, null, logger, soundManager, transport);
     }
 
     private UserAgent(SipListener sipListener, Config config, String peersHome,
-            Logger logger, AbstractSoundManager soundManager)
+            Logger logger, AbstractSoundManager soundManager, String transport)
                     throws SocketException {
+        this.transport = transport;
         this.sipListener = sipListener;
         if (peersHome == null) {
             peersHome = Utils.DEFAULT_PEERS_HOME;
@@ -247,13 +255,18 @@ public class UserAgent {
             throws SipUriSyntaxException {
         return uac.invite(requestUri, callId);
     }
+
+    public SipRequest invite(String requestUri, String callId, String sdpMessage)
+            throws SipUriSyntaxException {
+        return uac.invite(requestUri, callId, sdpMessage);
+    }
     
     public void terminate(SipRequest sipRequest) {
         uac.terminate(sipRequest);
     }
     
-    public void acceptCall(SipRequest sipRequest, Dialog dialog) {
-        uas.acceptCall(sipRequest, dialog);
+    public void acceptCall(SipRequest sipRequest, Dialog dialog, String responseSdp) {
+        uas.acceptCall(sipRequest, dialog, responseSdp);
     }
     
     public void rejectCall(SipRequest sipRequest) {

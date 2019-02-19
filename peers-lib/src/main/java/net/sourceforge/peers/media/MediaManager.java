@@ -175,7 +175,7 @@ public class MediaManager {
         }
 
     }
-
+/*
     public void handleAck(String destAddress, int destPort, Codec codec) {
         switch (userAgent.getMediaMode()) {
         case captureAndPlayback:
@@ -231,7 +231,7 @@ public class MediaManager {
         default:
             break;
         }
-    }
+    }*/
 
     public void updateRemote(String destAddress, int destPort, Codec codec) {
         switch (userAgent.getMediaMode()) {

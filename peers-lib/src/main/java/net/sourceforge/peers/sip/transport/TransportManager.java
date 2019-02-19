@@ -34,11 +34,7 @@ import static net.sourceforge.peers.sip.RFC3261.TRANSPORT_VIA_SEP;
 import static net.sourceforge.peers.sip.RFC3261.TRANSPORT_VIA_SEP2;
 
 import java.io.IOException;
-import java.net.DatagramSocket;
-import java.net.Inet4Address;
-import java.net.InetAddress;
-import java.net.SocketException;
-import java.net.UnknownHostException;
+import java.net.*;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.Hashtable;
@@ -47,6 +43,7 @@ import net.sourceforge.peers.Config;
 import net.sourceforge.peers.Logger;
 import net.sourceforge.peers.sip.RFC3261;
 import net.sourceforge.peers.sip.Utils;
+import net.sourceforge.peers.sip.core.useragent.SocketHolder;
 import net.sourceforge.peers.sip.syntaxencoding.SipHeaderFieldName;
 import net.sourceforge.peers.sip.syntaxencoding.SipHeaderFieldValue;
 import net.sourceforge.peers.sip.syntaxencoding.SipHeaderParamName;
@@ -69,6 +66,9 @@ public class TransportManager {
     protected SipParser sipParser;
     
     private Hashtable<SipTransportConnection, DatagramSocket> datagramSockets;
+    private Hashtable<SipTransportConnection, Socket> tcpSockets;
+    private Hashtable<SipTransportConnection, ServerSocket> tcpServerSockets;
+
     private Hashtable<SipTransportConnection, MessageSender> messageSenders;
     private Hashtable<SipTransportConnection, MessageReceiver> messageReceivers;
 
@@ -81,6 +81,9 @@ public class TransportManager {
             Config config, Logger logger) {
         sipParser = new SipParser();
         datagramSockets = new Hashtable<SipTransportConnection, DatagramSocket>();
+        tcpSockets = new Hashtable<SipTransportConnection, Socket>();
+        tcpServerSockets = new Hashtable<SipTransportConnection, ServerSocket>();
+
         messageSenders = new Hashtable<SipTransportConnection, MessageSender>();
         messageReceivers = new Hashtable<SipTransportConnection, MessageReceiver>();
         this.transactionManager = transactionManager;
@@ -104,6 +107,7 @@ public class TransportManager {
         SipHeaderFieldValue via = Utils.getTopVia(sipRequest);
         StringBuffer buf = new StringBuffer(DEFAULT_SIP_VERSION);
         buf.append(TRANSPORT_VIA_SEP);
+        int length = sipRequest.toString().getBytes().length;
         if (sipRequest.toString().getBytes().length > TRANSPORT_UDP_USUAL_MAX_SIZE) {
             transport = TRANSPORT_TCP;
         }
@@ -153,6 +157,7 @@ public class TransportManager {
                 config.getLocalInetAddress(), sipPort, inetAddress, port,
                 transport);
 
+
         MessageSender messageSender = messageSenders.get(connection);
         if (messageSender == null) {
             messageSender = createMessageSender(connection);
@@ -173,6 +178,9 @@ public class TransportManager {
         MessageReceiver messageReceiver = messageReceivers.get(conn);
         if (messageReceiver == null) {
             messageReceiver = createMessageReceiver(conn);
+            if(messageReceiver == null) {
+                return;
+            }
             new Thread(messageReceiver, threadName(port)).start();
         }
         if (!messageReceiver.isListening()) {
@@ -336,6 +344,39 @@ public class TransportManager {
         } else {
             // TODO
             // messageReceiver = new TcpMessageReceiver(port);
+            //TODO use Utils.getMyAddress to create socket on appropriate NIC
+            Socket tcpSocket = tcpSockets.get(conn);
+            if (tcpSocket == null) {
+                logger.debug("new TcpSocket(" + conn.getLocalPort()
+                        + ", " + conn.getLocalInetAddress() + ")");
+                // AccessController.doPrivileged added for plugin compatibility
+                tcpSocket = AccessController.doPrivileged(
+                        new PrivilegedAction<Socket>() {
+
+                            @Override
+                            public Socket run() {
+                                try {
+                                    return new Socket(conn.getRemoteInetAddress(),conn.getRemotePort(),
+                                            conn.getLocalInetAddress(), conn.getLocalPort());
+                                } catch (IOException e) {
+                                    logger.error("cannot create socket", e);
+                                } catch (SecurityException e) {
+                                    logger.error("security exception", e);
+                                }
+                                return null;
+                            }
+                        }
+                );
+                if (tcpSocket == null) {
+                    throw new SocketException();
+                }
+                tcpSocket.setSoTimeout(SOCKET_TIMEOUT);
+                tcpSockets.put(conn, tcpSocket);
+                logger.info("added tcp socket " + conn);
+            }
+            socket = tcpSocket;
+            messageSender = new TcpMessageSender(conn.getRemoteInetAddress(),
+                    conn.getRemotePort(), tcpSocket, config, logger);
         }
         messageSenders.put(conn, messageSender);
         //when a mesage is sent over a transport, the transport layer
@@ -362,6 +403,11 @@ public class TransportManager {
         if (RFC3261.TRANSPORT_UDP.equalsIgnoreCase(conn.getTransport())) {
             DatagramSocket datagramSocket = (DatagramSocket)socket;
             messageReceiver = new UdpMessageReceiver(datagramSocket,
+                    transactionManager, this, config, logger);
+            messageReceiver.setSipServerTransportUser(sipServerTransportUser);
+        } else {
+            Socket tcpSocket = (Socket)socket;
+            messageReceiver = new TcpMessageReceiver(tcpSocket,
                     transactionManager, this, config, logger);
             messageReceiver.setSipServerTransportUser(sipServerTransportUser);
         }
@@ -414,9 +460,99 @@ public class TransportManager {
                     transactionManager, this, config, logger);
             messageReceiver.setSipServerTransportUser(sipServerTransportUser);
             //TODO create also tcp receiver using a recursive call
-        } else {
+        } else if(conn.getLocalPort() == 0)
+        {
+            // TCP server socket
             //TODO
-            //messageReceiver = new TcpMessageReceiver(port);
+
+            ServerSocket tcpServerSocket = tcpServerSockets.get(conn);
+            if (tcpServerSocket == null) {
+                // AccessController.doPrivileged added for plugin compatibility
+                tcpServerSocket = AccessController.doPrivileged(
+                        new PrivilegedAction<ServerSocket>() {
+
+                            @Override
+                            public ServerSocket run() {
+                                try {
+                                    ServerSocket socket = new ServerSocket(0);
+                                    socket.setReuseAddress(true);
+                                    sipPort = socket.getLocalPort();
+                                    logger.debug("new Tcp Server Socket(" + sipPort
+                                            + ", " + conn.getLocalInetAddress());
+                                    socket.close();
+                                    return socket;
+                                } catch (IOException e) {
+                                    logger.error("cannot create socket", e);
+                                } catch (SecurityException e) {
+                                    logger.error("security exception", e);
+                                }
+                                return null;
+                            }
+                        }
+                );
+                sipTransportConnection = new SipTransportConnection(
+                        conn.getLocalInetAddress(),
+                        tcpServerSocket.getLocalPort(),
+                        conn.getRemoteInetAddress(),
+                        conn.getRemotePort(),
+                        conn.getTransport());
+
+                tcpServerSockets.put(sipTransportConnection, tcpServerSocket);
+                logger.info("added tcp socket " + sipTransportConnection);
+            }
+            /*
+            try{
+                messageReceiver = new TcpMessageReceiver(tcpServerSocket.accept(),
+                        transactionManager, this, config, logger);
+            }catch (IOException e) {
+                logger.error("cannot create new TcpMessageReceiver", e);
+            } catch (SecurityException e) {
+                logger.error("security exception", e);
+            }
+
+            messageReceiver.setSipServerTransportUser(sipServerTransportUser);
+            */
+            return null;
+        }else {
+            Socket tcpSocket = tcpSockets.get(conn);
+            if (tcpSocket == null) {
+                logger.debug("new TcpSocket(" + conn.getLocalPort()
+                        + ", " + conn.getLocalInetAddress());
+                // AccessController.doPrivileged added for plugin compatibility
+                tcpSocket = AccessController.doPrivileged(
+                        new PrivilegedAction<Socket>() {
+
+                            @Override
+                            public Socket run() {
+                                try {
+                                    return new Socket(conn.getRemoteInetAddress(),conn.getRemotePort(),
+                                            conn.getLocalInetAddress(), conn.getLocalPort());
+                                } catch (IOException e) {
+                                    logger.error("cannot create socket", e);
+                                } catch (SecurityException e) {
+                                    logger.error("security exception", e);
+                                }
+                                return null;
+                            }
+                        }
+                );
+                tcpSocket.setSoTimeout(SOCKET_TIMEOUT);
+                if (conn.getLocalPort() == 0) {
+                    sipTransportConnection = new SipTransportConnection(
+                            conn.getLocalInetAddress(),
+                            tcpSocket.getLocalPort(),
+                            conn.getRemoteInetAddress(),
+                            conn.getRemotePort(),
+                            conn.getTransport());
+                    //config.setSipPort(datagramSocket.getLocalPort());
+                }
+                sipPort = tcpSocket.getLocalPort();
+                tcpSockets.put(sipTransportConnection, tcpSocket);
+                logger.info("added tcp socket " + sipTransportConnection);
+            }
+            messageReceiver = new TcpMessageReceiver(tcpSocket,
+                    transactionManager, this, config, logger);
+            messageReceiver.setSipServerTransportUser(sipServerTransportUser);
         }
         messageReceivers.put(sipTransportConnection, messageReceiver);
         logger.info("added " + sipTransportConnection + ": " + messageReceiver

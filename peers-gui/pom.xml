@@ -12,6 +12,58 @@
   </properties>
 
   <dependencies>
+    <!-- Fm IceLink -->
+    <dependency>
+      <groupId>fm.icelink</groupId>
+      <artifactId>fm.icelink.audioprocessing</artifactId>
+      <version>3.2.10</version>
+    </dependency>
+    <dependency>
+      <groupId>fm.icelink</groupId>
+      <artifactId>fm.icelink</artifactId>
+      <version>3.2.10</version>
+    </dependency>
+    <dependency>
+      <groupId>fm.icelink</groupId>
+      <artifactId>fm.icelink.java</artifactId>
+      <version>3.2.10</version>
+    </dependency>
+    <dependency>
+      <groupId>fm.icelink</groupId>
+      <artifactId>fm.icelink.java.sarxos</artifactId>
+      <version>3.2.10</version>
+    </dependency>
+    <dependency>
+      <groupId>fm.icelink</groupId>
+      <artifactId>fm.icelink.opus</artifactId>
+      <version>3.2.10</version>
+    </dependency>
+    <dependency>
+      <groupId>fm.icelink</groupId>
+      <artifactId>fm.icelink.vpx</artifactId>
+      <version>3.2.10</version>
+    </dependency>
+    <dependency>
+      <groupId>fm.icelink</groupId>
+      <artifactId>fm.icelink.openh264</artifactId>
+      <version>3.2.10</version>
+    </dependency>
+    <dependency>
+      <groupId>fm.icelink</groupId>
+      <artifactId>fm.icelink.websync4</artifactId>
+      <version>3.2.10</version>
+    </dependency>
+    <dependency>
+      <groupId>fm.icelink</groupId>
+      <artifactId>fm.icelink.yuv</artifactId>
+      <version>3.2.10</version>
+    </dependency>
+    <dependency>
+      <groupId>fm.icelink</groupId>
+      <artifactId>fm</artifactId>
+      <version>3.2.10</version>
+    </dependency>
+    <!-- End fm Icelink -->
     <dependency>
       <groupId>${project.groupId}</groupId>
       <artifactId>peers-lib</artifactId>
@@ -26,6 +78,15 @@
 
   <build>
     <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.8.0</version>
+        <configuration>
+          <source>1.8</source>
+          <target>1.8</target>
+        </configuration>
+      </plugin>
       <plugin>
         <artifactId>maven-assembly-plugin</artifactId>
         <version>2.2.1</version>

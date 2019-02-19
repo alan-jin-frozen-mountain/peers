@@ -41,10 +41,16 @@ import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import javax.swing.border.Border;
 
+import java.io.BufferedReader;
+import java.util.stream.Collectors;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+
 import net.sourceforge.peers.FileLogger;
 import net.sourceforge.peers.Logger;
 import net.sourceforge.peers.javaxsound.JavaxSoundManager;
 import net.sourceforge.peers.media.AbstractSoundManager;
+import net.sourceforge.peers.sip.RFC3261;
 import net.sourceforge.peers.sip.Utils;
 import net.sourceforge.peers.sip.transport.SipRequest;
 import net.sourceforge.peers.sip.transport.SipResponse;
@@ -74,6 +80,7 @@ public class MainFrame implements WindowListener, ActionListener {
     private EventManager eventManager;
     private Registration registration;
     private Logger logger;
+    private String transport = RFC3261.TRANSPORT_TCP;
 
     public MainFrame(final String[] args) {
         String peersHome = Utils.DEFAULT_PEERS_HOME;
@@ -87,6 +94,21 @@ public class MainFrame implements WindowListener, ActionListener {
         } catch (Exception e) {
             logger.error("cannot change look and feel", e);
         }
+
+        try {
+            InputStream input = getClass().getResourceAsStream("icelink.key");
+            BufferedReader reader = new BufferedReader(new InputStreamReader(input));
+
+            String key = reader.lines().collect(Collectors.joining("\n"));
+
+            fm.icelink.License.setKey(key);
+        } catch (Exception ex) {
+            logger.info("Must input license key into icelink.key file: ");
+        }
+
+        fm.icelink.Log.setLogLevel(fm.icelink.LogLevel.Debug);
+        fm.icelink.Log.setProvider(new fm.icelink.ConsoleLogProvider(fm.icelink.LogLevel.Debug));
+
         final AbstractSoundManager soundManager = new JavaxSoundManager(
                 false, //TODO config.isMediaDebug(),
                 logger, peersHome);
@@ -141,7 +163,7 @@ public class MainFrame implements WindowListener, ActionListener {
                     peersHome = args[0];
                 }
                 eventManager = new EventManager(MainFrame.this,
-                        peersHome, logger, soundManager);
+                        peersHome, logger, soundManager, transport);
                     eventManager.register();
             }
         }, "gui-event-manager");

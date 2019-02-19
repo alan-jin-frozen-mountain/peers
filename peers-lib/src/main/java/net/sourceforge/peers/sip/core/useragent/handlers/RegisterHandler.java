@@ -84,7 +84,7 @@ public class RegisterHandler extends MethodHandler
             port = RFC3261.TRANSPORT_DEFAULT_PORT;
         }
         //TODO if header route is present, addrspec = toproute.nameaddress.addrspec
-        String transport = RFC3261.TRANSPORT_UDP;
+        String transport = userAgent.getTransport();
         Hashtable<String, String> params = destinationUri.getUriParameters();
         if (params != null) {
             String reqUriTransport = params.get(RFC3261.PARAM_TRANSPORT);

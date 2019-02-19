@@ -23,7 +23,7 @@ public class RFC4733 {
 
     // payload types
 
-    public static final int PAYLOAD_TYPE_TELEPHONE_EVENT = 101;
+    public static final int PAYLOAD_TYPE_TELEPHONE_EVENT = 98;
 
     // encoding names
 
